@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>おもさで ならべっこ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* カスタムフォントとアニメーションの設定 */
+        @import url('https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap');
+        
+        body {
+            font-family: 'Kosugi Maru', sans-serif;
+            background-color: #fdf4ff; /* 薄いピンク/紫系（パープルテーマに合わせて） */
+            touch-action: manipulation; /* ダブルタップズームなどを防ぎ操作性を向上 */
+        }
+
+        /* アニメーション関連 */
+        .seesaw-board {
+            transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transform-origin: center center;
+        }
+        
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            80% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-in {
+            animation: popIn 0.4s ease-out forwards;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+        .is-selected {
+            border-color: #fbbf24 !important; /* アンバー色 */
+            background-color: #fef3c7 !important;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.6);
+            animation: float 1.5s infinite ease-in-out;
+            z-index: 50;
+        }
+
+        @keyframes tada {
+            0% { transform: scale(1); }
+            10%, 20% { transform: scale(0.9) rotate(-3deg); }
+            30%, 50%, 70%, 90% { transform: scale(1.1) rotate(3deg); }
+            40%, 60%, 80% { transform: scale(1.1) rotate(-3deg); }
+            100% { transform: scale(1) rotate(0); }
+        }
+        .tada {
+            animation: tada 1s ease-in-out;
+        }
+
+        /* 土台のCSS図形 */
+        .triangle-base {
+            width: 0;
+            height: 0;
+            border-left: 30px solid transparent;
+            border-right: 30px solid transparent;
+            border-bottom: 50px solid #f59e0b; /* オレンジ色 */
+        }
+
+        /* ターゲット可能なスロットの点滅エフェクト */
+        @keyframes pulseBorder {
+            0% { border-color: rgba(52, 211, 153, 0.4); }
+            50% { border-color: rgba(52, 211, 153, 1); }
+            100% { border-color: rgba(52, 211, 153, 0.4); }
+        }
+        .can-place {
+            border: 3px dashed #34d399; /* エメラルド色 */
+            animation: pulseBorder 1.5s infinite;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="text-gray-800 pb-10 flex flex-col min-h-screen">
+
+    <header class="bg-purple-500 text-white text-center p-4 shadow-md rounded-b-3xl mb-4 relative z-10">
+        <h1 class="text-2xl font-bold flex items-center justify-center gap-2">
+            <span>🥇</span> おもさで ならべっこ
+        </h1>
+        <p class="mt-1 text-purple-100 text-sm">てんびんで くらべて、かるい じゅんに ならべよう！</p>
+    </header>
+
+    <main class="flex-grow max-w-3xl mx-auto w-full px-4 flex flex-col gap-6">
+        
+        <!-- ガイドメッセージ -->
+        <div class="bg-white/80 rounded-full py-2 px-4 text-center shadow-sm text-purple-700 font-bold border-2 border-purple-200" id="guide-message">
+            ① くだものを タップしてね 👆
+        </div>
+
+        <!-- アイテム置き場（初期位置） -->
+        <div class="bg-white p-4 rounded-3xl shadow-sm border-2 border-purple-200 flex justify-center items-center gap-4 min-h-[120px]" id="pool-container">
+            <!-- JSでアイテムを生成 -->
+        </div>
+
+        <!-- てんびんエリア -->
+        <div class="bg-blue-50 p-4 rounded-3xl shadow-sm border-2 border-blue-200 flex flex-col items-center">
+            <h2 class="text-blue-600 font-bold mb-4 flex items-center gap-1">
+                <span class="text-xl">⚖️</span> くらべてみよう
+            </h2>
+            
+            <div class="relative w-full max-w-sm h-32 flex flex-col justify-end items-center pb-4">
+                <!-- てんびんの板 -->
+                <div id="seesaw-board" class="seesaw-board w-full h-3 bg-orange-300 rounded-full relative z-10 flex justify-between items-end px-4">
+                    <!-- 左スロット -->
+                    <div id="scale-left" class="w-16 h-16 md:w-20 md:h-20 -mb-2 flex items-end justify-center rounded-xl bg-white/50 transition-all slot-container" data-slot-type="scale" data-slot-index="left" onclick="handleSlotClick('scale', 'left')">
+                        <!-- アイテムが入る -->
+                    </div>
+                    <!-- 右スロット -->
+                    <div id="scale-right" class="w-16 h-16 md:w-20 md:h-20 -mb-2 flex items-end justify-center rounded-xl bg-white/50 transition-all slot-container" data-slot-type="scale" data-slot-index="right" onclick="handleSlotClick('scale', 'right')">
+                        <!-- アイテムが入る -->
+                    </div>
+                </div>
+                <!-- 土台 -->
+                <div class="triangle-base relative z-0 -mt-2"></div>
+            </div>
+            
+            <div id="scale-message" class="h-6 text-red-500 font-bold mt-2 text-center text-sm">
+                <!-- くらべた結果のメッセージ -->
+            </div>
+        </div>
+
+        <!-- ならべっこエリア -->
+        <div class="bg-amber-50 p-4 rounded-3xl shadow-sm border-2 border-amber-200 relative pb-16">
+            <h2 class="text-amber-700 font-bold mb-4 text-center flex items-center justify-center gap-1">
+                <span class="text-xl">✨</span> かるい じゅんに ならべよう！
+            </h2>
+            
+            <div class="flex justify-between items-end px-2 md:px-8 mt-6">
+                
+                <!-- 1. かるい -->
+                <div class="flex flex-col items-center gap-2">
+                    <div class="text-xs font-bold text-gray-500 bg-white px-2 py-1 rounded-full shadow-sm mb-1">🎈1ばん かるい</div>
+                    <div id="pedestal-0" class="w-16 h-16 md:w-20 md:h-20 bg-white/60 rounded-xl transition-all slot-container flex items-end justify-center" data-slot-type="pedestal" data-slot-index="0" onclick="handleSlotClick('pedestal', 0)"></div>
+                    <div class="w-20 h-4 bg-amber-200 rounded-t-md"></div>
+                    <div class="w-24 h-6 bg-amber-300 rounded-md shadow-sm"></div>
+                </div>
+
+                <!-- 2. 中くらい -->
+                <div class="flex flex-col items-center gap-2">
+                    <div class="text-xs font-bold text-gray-500 bg-white px-2 py-1 rounded-full shadow-sm mb-1">🍎ちゅうくらい</div>
+                    <div id="pedestal-1" class="w-16 h-16 md:w-20 md:h-20 bg-white/60 rounded-xl transition-all slot-container flex items-end justify-center" data-slot-type="pedestal" data-slot-index="1" onclick="handleSlotClick('pedestal', 1)"></div>
+                    <div class="w-20 h-8 bg-amber-300 rounded-t-md"></div>
+                    <div class="w-24 h-6 bg-amber-400 rounded-md shadow-sm"></div>
+                </div>
+
+                <!-- 3. おもい -->
+                <div class="flex flex-col items-center gap-2">
+                    <div class="text-xs font-bold text-gray-500 bg-white px-2 py-1 rounded-full shadow-sm mb-1">🐘1ばん おもい</div>
+                    <div id="pedestal-2" class="w-16 h-16 md:w-20 md:h-20 bg-white/60 rounded-xl transition-all slot-container flex items-end justify-center" data-slot-type="pedestal" data-slot-index="2" onclick="handleSlotClick('pedestal', 2)"></div>
+                    <div class="w-20 h-12 bg-amber-400 rounded-t-md"></div>
+                    <div class="w-24 h-6 bg-amber-500 rounded-md shadow-sm"></div>
+                </div>
+
+            </div>
+
+            <!-- 判定ボタン -->
+            <div class="absolute -bottom-6 left-0 w-full flex justify-center">
+                <button id="check-btn" onclick="checkAnswer()" class="hidden bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-10 rounded-full shadow-lg border-4 border-white transition-transform active:scale-95 text-lg z-20">
+                    できた！
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- 成功時のモーダル（アラートの代わり） -->
+    <div id="success-modal" class="fixed inset-0 bg-black/50 hidden flex justify-center items-center z-50 p-4 backdrop-blur-sm transition-opacity opacity-0">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl transform scale-90 transition-transform duration-300" id="modal-content">
+            <div class="text-6xl mb-4 tada">🎉</div>
+            <h2 class="text-2xl font-bold text-red-500 mb-2">だいせいかい！</h2>
+            <p class="text-gray-600 mb-6">かるい じゅんに ならべられたね！</p>
+            <button onclick="resetGame()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-full shadow-md active:scale-95 transition-transform w-full">
+                🔄 もういっかい 遊ぶ
+            </button>
+        </div>
+    </div>
+
+    <!-- Javascript -->
+    <script>
+        // -------------------------
+        // データと状態管理 (State)
+        // -------------------------
+        
+        // アイテムのデータ（重さの数値を変更し、種類を大幅に追加）
+        const allItems = {
+            // くだもの
+            'strawberry': { id: 'strawberry', emoji: '🍓', weight: 3, name: 'いちご' },
+            'grape':      { id: 'grape', emoji: '🍇', weight: 5, name: 'ぶどう' },
+            'apple':      { id: 'apple', emoji: '🍎', weight: 6, name: 'りんご' },
+            'melon':      { id: 'melon', emoji: '🍈', weight: 8, name: 'メロン' },
+            'watermelon': { id: 'watermelon', emoji: '🍉', weight: 9, name: 'すいか' },
+            // 動物
+            'mouse':      { id: 'mouse', emoji: '🐁', weight: 2, name: 'ねずみ' },
+            'cat':        { id: 'cat', emoji: '🐈', weight: 11, name: 'ねこ' },
+            'pig':        { id: 'pig', emoji: '🐷', weight: 13, name: 'ぶた' },
+            'elephant':   { id: 'elephant', emoji: '🐘', weight: 15, name: 'ぞう' },
+            // 日常生活で使うもの
+            'pencil':     { id: 'pencil', emoji: '✏️', weight: 1, name: 'えんぴつ' },
+            'spoon':      { id: 'spoon', emoji: '🥄', weight: 4, name: 'スプーン' },
+            'cup':        { id: 'cup', emoji: '🥤', weight: 7, name: 'コップ' },
+            'chair':      { id: 'chair', emoji: '🪑', weight: 10, name: 'いす' },
+            'bicycle':    { id: 'bicycle', emoji: '🚲', weight: 12, name: 'じてんしゃ' },
+            'car':        { id: 'car', emoji: '🚗', weight: 14, name: 'くるま' }
+        };
+
+        // 今回のゲームでランダムに選ばれた3つのアイテム
+        let activeItems = {};
+
+        // アプリケーションの状態
+        let state = {
+            locations: {},
+            selectedItem: null 
+        };
+
+        // ランダムに3つのアイテムを選ぶ関数
+        function pickRandomItems() {
+            const keys = Object.keys(allItems);
+            // 配列をシャッフル
+            for (let i = keys.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [keys[i], keys[j]] = [keys[j], keys[i]];
+            }
+            const selectedKeys = keys.slice(0, 3);
+            
+            activeItems = {};
+            state.locations = {};
+            selectedKeys.forEach(key => {
+                activeItems[key] = allItems[key];
+                state.locations[key] = 'pool'; // 全てプール（初期位置）に置く
+            });
+            state.selectedItem = null;
+        }
+
+        // -------------------------
+        // UI更新・描画 (Render)
+        // -------------------------
+
+        // 状態に基づいて画面全体を再描画する
+        function render() {
+            // 1. 全てのスロット（場所）を一旦空にする
+            document.getElementById('pool-container').innerHTML = '';
+            document.getElementById('scale-left').innerHTML = '';
+            document.getElementById('scale-right').innerHTML = '';
+            document.getElementById('pedestal-0').innerHTML = '';
+            document.getElementById('pedestal-1').innerHTML = '';
+            document.getElementById('pedestal-2').innerHTML = '';
+
+            // 各スロットの「置けるよ」状態（点線枠）をリセット
+            document.querySelectorAll('.slot-container').forEach(el => {
+                el.classList.remove('can-place');
+                el.classList.add('border-2', 'border-transparent'); // デフォルト枠線
+            });
+
+            // 2. アイテムを現在の場所に配置する
+            Object.keys(state.locations).forEach(itemId => {
+                const loc = state.locations[itemId];
+                const itemEl = createItemElement(itemId);
+                
+                if (loc === 'pool') {
+                    document.getElementById('pool-container').appendChild(itemEl);
+                } else if (loc === 'scale_left') {
+                    document.getElementById('scale-left').appendChild(itemEl);
+                } else if (loc === 'scale_right') {
+                    document.getElementById('scale-right').appendChild(itemEl);
+                } else if (loc.startsWith('pedestal_')) {
+                    const index = loc.split('_')[1];
+                    document.getElementById(`pedestal-${index}`).appendChild(itemEl);
+                }
+            });
+
+            // 3. 選択状態（selectedItem）のUI反映
+            const guideMessage = document.getElementById('guide-message');
+            if (state.selectedItem) {
+                // アイテムを持っている場合：空いているスロットを光らせる
+                guideMessage.innerHTML = '② おきたい場所を タップしてね 👇';
+                guideMessage.classList.replace('text-purple-700', 'text-teal-600');
+                guideMessage.classList.replace('border-purple-200', 'border-teal-300');
+
+                highlightEmptySlots();
+            } else {
+                // 持っていない場合
+                guideMessage.innerHTML = '① くだものを タップしてね 👆';
+                guideMessage.classList.replace('text-teal-600', 'text-purple-700');
+                guideMessage.classList.replace('border-teal-300', 'border-purple-200');
+            }
+
+            // 4. てんびんの傾きを計算・反映
+            updateScale();
+
+            // 5. 判定ボタンの表示/非表示（台座が3つ埋まったら表示）
+            checkReadyToSubmit();
+        }
+
+        // アイテムのDOM要素を作成する
+        function createItemElement(itemId) {
+            const data = activeItems[itemId];
+            const div = document.createElement('div');
+            
+            // 基本クラス
+            let classNames = "w-14 h-14 md:w-16 md:h-16 flex items-center justify-center text-4xl md:text-5xl bg-white border-4 border-gray-200 rounded-full shadow-sm cursor-pointer transition-transform pop-in select-none";
+            
+            // 選択中のアイテムは見た目を変える
+            if (state.selectedItem === itemId) {
+                classNames += " is-selected";
+            } else {
+                classNames += " hover:scale-110 active:scale-95 hover:border-purple-300";
+            }
+
+            div.className = classNames;
+            div.innerText = data.emoji;
+            
+            // クリックイベント
+            div.onclick = (e) => {
+                e.stopPropagation(); // スロットのクリックイベントを発火させない
+                handleItemClick(itemId);
+            };
+            
+            return div;
+        }
+
+        // 空いているスロット（置ける場所）をハイライトする
+        function highlightEmptySlots() {
+            // てんびん
+            ['left', 'right'].forEach(side => {
+                const el = document.getElementById(`scale-${side}`);
+                if (el.children.length === 0) {
+                    el.classList.add('can-place');
+                }
+            });
+            // 台座
+            [0, 1, 2].forEach(index => {
+                const el = document.getElementById(`pedestal-${index}`);
+                if (el.children.length === 0) {
+                    el.classList.add('can-place');
+                }
+            });
+        }
+
+        // -------------------------
+        // インタラクション (Actions)
+        // -------------------------
+
+        // アイテムがタップされた時の処理
+        function handleItemClick(itemId) {
+            if (state.selectedItem === itemId) {
+                // 同じものをもう一度タップしたらキャンセル（選択解除）
+                state.selectedItem = null;
+            } else {
+                // 別のアイテムをタップしたらそれを選択
+                state.selectedItem = itemId;
+                
+                // もし「すでにスロットに置かれているアイテム」をタップした場合、
+                // 一旦プール（初期位置）に戻してから選択状態にする（移動しやすくするため）
+                if (state.locations[itemId] !== 'pool') {
+                    state.locations[itemId] = 'pool';
+                }
+            }
+            render();
+        }
+
+        // スロット（空き場所）がタップされた時の処理
+        function handleSlotClick(type, index) {
+            // アイテムを持っていない場合は何もしない
+            if (!state.selectedItem) return;
+
+            const targetLocation = type === 'scale' ? `scale_${index}` : `pedestal_${index}`;
+
+            // 指定した場所にすでに別のアイテムがある場合は何もしない（今回は上書きしない安全設計）
+            let isOccupied = false;
+            Object.values(state.locations).forEach(loc => {
+                if (loc === targetLocation) isOccupied = true;
+            });
+
+            if (!isOccupied) {
+                // 移動させる
+                state.locations[state.selectedItem] = targetLocation;
+                state.selectedItem = null; // 手から離す
+                render();
+            }
+        }
+
+        // -------------------------
+        // ロジック (Logic)
+        // -------------------------
+
+        // てんびんの傾きとメッセージを更新する
+        function updateScale() {
+            const board = document.getElementById('seesaw-board');
+            const messageEl = document.getElementById('scale-message');
+            
+            let leftWeight = 0;
+            let rightWeight = 0;
+            let leftName = "";
+            let rightName = "";
+
+            // 左の重さを計算
+            Object.keys(state.locations).forEach(itemId => {
+                if (state.locations[itemId] === 'scale_left') {
+                    leftWeight = activeItems[itemId].weight;
+                    leftName = activeItems[itemId].name;
+                }
+                if (state.locations[itemId] === 'scale_right') {
+                    rightWeight = activeItems[itemId].weight;
+                    rightName = activeItems[itemId].name;
+                }
+            });
+
+            let rotation = 0;
+            
+            if (leftWeight > 0 && rightWeight > 0) {
+                if (leftWeight > rightWeight) {
+                    rotation = -15; // 左が重い
+                    messageEl.innerHTML = `👇 <b>${leftName}</b> のほうが おもい！`;
+                } else if (leftWeight < rightWeight) {
+                    rotation = 15;  // 右が重い
+                    messageEl.innerHTML = `<b>${rightName}</b> のほうが おもい！ 👇`;
+                }
+            } else if (leftWeight > 0) {
+                rotation = -20;
+                messageEl.innerHTML = "";
+            } else if (rightWeight > 0) {
+                rotation = 20;
+                messageEl.innerHTML = "";
+            } else {
+                rotation = 0;
+                messageEl.innerHTML = "";
+            }
+
+            board.style.transform = `rotate(${rotation}deg)`;
+        }
+
+        // すべての台座にアイテムが置かれているかチェックし、ボタンを表示する
+        function checkReadyToSubmit() {
+            const btn = document.getElementById('check-btn');
+            
+            let ped0 = false, ped1 = false, ped2 = false;
+            Object.values(state.locations).forEach(loc => {
+                if (loc === 'pedestal_0') ped0 = true;
+                if (loc === 'pedestal_1') ped1 = true;
+                if (loc === 'pedestal_2') ped2 = true;
+            });
+
+            if (ped0 && ped1 && ped2) {
+                btn.classList.remove('hidden');
+                btn.classList.add('pop-in');
+            } else {
+                btn.classList.add('hidden');
+                btn.classList.remove('pop-in');
+            }
+        }
+
+        // 正解かどうか判定する
+        function checkAnswer() {
+            let itemAtPed0 = null;
+            let itemAtPed1 = null;
+            let itemAtPed2 = null;
+
+            Object.keys(state.locations).forEach(itemId => {
+                if (state.locations[itemId] === 'pedestal_0') itemAtPed0 = activeItems[itemId];
+                if (state.locations[itemId] === 'pedestal_1') itemAtPed1 = activeItems[itemId];
+                if (state.locations[itemId] === 'pedestal_2') itemAtPed2 = activeItems[itemId];
+            });
+
+            // 安全チェック
+            if (!itemAtPed0 || !itemAtPed1 || !itemAtPed2) return;
+
+            // 正しい順番かチェック
+            if (itemAtPed0.weight < itemAtPed1.weight && itemAtPed1.weight < itemAtPed2.weight) {
+                // 正解！
+                showModal();
+            } else {
+                // 不正解...
+                const guide = document.getElementById('guide-message');
+                guide.innerHTML = 'ざんねん！ もういっかい くらべてみよう 🔄';
+                guide.classList.replace('text-purple-700', 'text-red-500');
+                guide.classList.replace('border-purple-200', 'border-red-300');
+                guide.classList.add('tada');
+                
+                // アニメーションをリセットするため
+                setTimeout(() => {
+                    guide.classList.remove('tada');
+                }, 1000);
+            }
+        }
+
+        // 成功モーダルの表示
+        function showModal() {
+            const modal = document.getElementById('success-modal');
+            const content = document.getElementById('modal-content');
+            
+            modal.classList.remove('hidden');
+            // 少し遅らせてopacityとscaleを変更してアニメーション
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                modal.classList.add('opacity-100');
+                content.classList.remove('scale-90');
+                content.classList.add('scale-100');
+            }, 10);
+        }
+
+        // ゲームのリセット
+        function resetGame() {
+            // モーダルを隠す
+            const modal = document.getElementById('success-modal');
+            modal.classList.remove('opacity-100');
+            modal.classList.add('opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300); // transition時間と合わせる
+
+            // 状態を初期化して新しいアイテムをセット
+            pickRandomItems();
+            
+            const guide = document.getElementById('guide-message');
+            guide.classList.remove('text-red-500', 'border-red-300');
+            guide.classList.add('text-purple-700', 'border-purple-200');
+
+            render();
+        }
+
+        // 初期化処理の実行
+        window.onload = () => {
+            pickRandomItems();
+            render();
+        };
+
+    </script>
+</body>
+</html>
